@@ -50,6 +50,7 @@ label.f{display:block;font-size:13px;color:var(--mute)}label.f input[type=number
 <nav id="nav" aria-label="Tools">
 <button data-t="speed" class="on"><i></i><svg viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></svg>Speed</button>
 <button data-t="pitch"><i></i><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>Pitch</button>
+<button data-t="hz"><i></i><svg viewBox="0 0 24 24"><path d="M2 12c2-8 4-8 6 0s4 8 6 0 4-8 6 0"/></svg>Hz</button>
 <button data-t="cut"><i></i><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg>Cutter</button>
 <button data-t="inv"><i></i><svg viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="3 3"/><path d="M8 7L3 12l5 5zM16 7l5 5-5 5z"/></svg>Invert</button>
 <button data-t="exp"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M4 20h16"/></svg>Export</button>
@@ -79,6 +80,15 @@ label.f{display:block;font-size:13px;color:var(--mute)}label.f input[type=number
 <input type="range" id="pitch" min="-12" max="12" step="0.5" value="0">
 <p class="hint">Measured in semitones. +12 is one octave higher, −12 one octave lower. Duration stays the same.</p></div>
 
+<div class="card panel" id="p-hz"><div class="row"><b>Sample rate (Hz)</b><span id="hv">Original</span></div>
+<div class="bar" id="hzb" style="margin-top:0">
+<button class="btn p" data-hz="0">Original</button>
+<button class="btn" data-hz="2000">2,000</button><button class="btn" data-hz="4000">4,000</button><button class="btn" data-hz="8000">8,000</button><button class="btn" data-hz="11025">11,025</button><button class="btn" data-hz="16000">16,000</button>
+<button class="btn" data-hz="22050">22,050</button><button class="btn" data-hz="32000">32,000</button><button class="btn" data-hz="44100">44,100</button>
+<button class="btn" data-hz="48000">48,000</button><button class="btn" data-hz="96000">96,000</button></div>
+<p class="hint" id="hzh"></p>
+<p class="hint">The sample rate sets how many times per second the sound is measured, which is its audio fidelity. Lower values sound muffled and lo-fi, and make smaller files. Going higher than your original does not add detail. The saved file uses the rate you choose.</p></div>
+
 <div class="card panel" id="p-cut"><div class="grid">
 <label class="f">Start (seconds)<input type="number" id="cs" min="0" step="0.01"></label>
 <label class="f">End (seconds)<input type="number" id="ce" min="0" step="0.01"></label></div>
@@ -97,7 +107,7 @@ label.f{display:block;font-size:13px;color:var(--mute)}label.f input[type=number
 
 <script>
 const $=id=>document.getElementById(id);
-const S={buf:null,name:'audio',start:0,end:0,speed:1,semi:0,rev:false,sp2:false,out:null};
+const S={buf:null,name:'audio',start:0,end:0,speed:1,semi:0,rate:0,rev:false,sp2:false,out:null};
 let ctx,src,t0=0,playing=false,raf,peaks=null,fmt='wav',timer;
 const AC=()=>ctx||(ctx=new (window.AudioContext||window.webkitAudioContext)());
 const fmtT=s=>{s=Math.max(0,s);return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0')};
@@ -176,7 +186,8 @@ function render(){
  let chs=[];
  for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c).slice(s,e);if(S.rev)d.reverse();chs.push(d)}
  chs=stretch(chs,T).map(d=>resample(d,P));
- const out=AC().createBuffer(chs.length,Math.max(1,chs[0].length),sr);
+ let or=sr;if(S.rate&&S.rate!==sr){chs=chs.map(d=>resample(d,sr/S.rate));or=S.rate}
+ let out;try{out=AC().createBuffer(chs.length,Math.max(1,chs[0].length),or)}catch(e){chs=chs.map(d=>resample(d,or/8000));or=8000;out=AC().createBuffer(chs.length,Math.max(1,chs[0].length),or)}
  chs.forEach((d,c)=>out.copyToChannel(d,c));S.out=out;
 }
 
@@ -191,12 +202,13 @@ function summary(quick){
  if(S.speed!==1)c.push(S.speed.toFixed(2)+'x speed');
  if(S.semi)c.push((S.semi>0?'+':'')+S.semi+' semitones');
  if(S.start>0||S.end<S.buf.duration-.005)c.push('Cut '+sel.toFixed(2)+'s');
+ if(S.rate)c.push('Sample rate '+S.rate.toLocaleString()+' Hz');
  if(S.rev)c.push('Inverted');
  $('chips').innerHTML=c.length?c.map(x=>`<span class="chip">${x}</span>`).join(''):'<span class="chip">No changes yet</span>';
- const m={speed:S.speed!==1||S.sp2,pitch:S.semi!==0,cut:c.some(x=>x.startsWith('Cut')),inv:S.rev};
+ const m={speed:S.speed!==1||S.sp2,pitch:S.semi!==0,hz:!!S.rate,cut:c.some(x=>x.startsWith('Cut')),inv:S.rev};
  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('mod',!!m[b.dataset.t]));
  const d=S.out?S.out.duration:sel/S.speed;
- $('info').textContent='Result: '+fmtT(d)+' ('+d.toFixed(1)+'s) · '+S.buf.numberOfChannels+'ch';
+ $('info').textContent='Result: '+fmtT(d)+' ('+d.toFixed(1)+'s) · '+S.buf.numberOfChannels+'ch · '+(S.out?S.out.sampleRate:S.buf.sampleRate).toLocaleString()+' Hz';
  $('tm').textContent=fmtT(0)+' / '+fmtT(d);
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -207,6 +219,10 @@ $('speed').oninput=e=>{S.speed=+e.target.value;$('sv').textContent=S.speed.toFix
 $('pitch').oninput=e=>{S.semi=+e.target.value;$('pv').textContent=(S.semi>0?'+':'')+S.semi+' st';update()};
 $('sp2').onchange=e=>{S.sp2=e.target.checked;update()};
 $('rev').onchange=e=>{S.rev=e.target.checked;update()};
+const HZN={"0": "Keeps your file’s own quality.", "2000":"Barely recognizable. Only a dull, muffled hum is left.","4000":"Extremely low quality. Only a thin, buzzy rumble of sound remains.","8000": "Telephone quality. Very muffled, only the lows and mids remain.", "11025": "Old low-quality audio. Dull and crunchy.", "16000": "Good for speech, but music sounds flat.", "22050": "AM radio quality. Noticeably less bright.", "32000": "FM radio quality. Slightly softer highs.", "44100": "CD quality. Full range for human hearing.", "48000": "Video and studio standard.", "96000": "High resolution. Bigger file, no audible gain for most people."};
+function hzSet(v){S.rate=v;$('hv').textContent=v?v.toLocaleString()+' Hz':'Original ('+S.buf.sampleRate.toLocaleString()+' Hz)';
+ $('hzh').textContent=HZN[v];document.querySelectorAll('[data-hz]').forEach(b=>b.classList.toggle('p',+b.dataset.hz===v));update()}
+document.querySelectorAll('[data-hz]').forEach(b=>b.onclick=()=>hzSet(+b.dataset.hz));
 function syncCut(){$('cs').value=S.start.toFixed(2);$('ce').value=S.end.toFixed(2)}
 $('cs').onchange=e=>{S.start=Math.min(Math.max(0,+e.target.value),S.end-.05);syncCut();update()};
 $('ce').onchange=e=>{S.end=Math.max(Math.min(S.buf.duration,+e.target.value),S.start+.05);syncCut();update()};
@@ -278,8 +294,9 @@ function wav(b){
  return new Blob([ab],{type:'audio/wav'});
 }
 function mp3(b){
- const nc=Math.min(2,b.numberOfChannels),enc=new lamejs.Mp3Encoder(nc,b.sampleRate,160),out=[];
- const L=i16(b.getChannelData(0)),R=nc>1?i16(b.getChannelData(1)):null;
+ const nc=Math.min(2,b.numberOfChannels),out=[];let sr=b.sampleRate,ch=[...Array(nc)].map((_,i)=>b.getChannelData(i));
+ if(![8000,11025,12000,16000,22050,24000,32000,44100,48000].includes(sr)){ch=ch.map(d=>resample(d,sr/48000));sr=48000}
+ const enc=new lamejs.Mp3Encoder(nc,sr,160),L=i16(ch[0]),R=nc>1?i16(ch[1]):null;
  for(let i=0;i<L.length;i+=1152){const d=R?enc.encodeBuffer(L.subarray(i,i+1152),R.subarray(i,i+1152)):enc.encodeBuffer(L.subarray(i,i+1152));if(d.length)out.push(d)}
  out.push(enc.flush());return new Blob(out,{type:'audio/mpeg'});
 }
